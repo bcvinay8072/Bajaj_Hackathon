@@ -62,26 +62,36 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return True
 
 # --- Document Processing Functions ---
+
 def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
     """
-    Extracts text from a PDF file stream using sequential OCR to save memory.
+    Extracts text using batched parallel OCR to balance speed and memory usage.
     """
-    text = ""
+    all_texts = []
     try:
         images = convert_from_bytes(file_stream.read())
         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
 
-        # Process one page at a time to conserve memory
-        for i, image in enumerate(images):
-            print(f"Performing OCR on page {i+1}...")
-            text += pytesseract.image_to_string(image) or ""
+        batch_size = 5 # Process 5 pages at a time
+
+        def ocr_page(image):
+            return pytesseract.image_to_string(image) or ""
+
+        with ThreadPoolExecutor() as executor:
+            # Process the images in small batches
+            for i in range(0, len(images), batch_size):
+                batch = images[i:i + batch_size]
+                print(f"Processing batch starting at page {i+1}...")
+                # Run OCR on the current batch in parallel
+                texts = list(executor.map(ocr_page, batch))
+                all_texts.extend(texts)
         
-        print("OCR text extraction complete.")
+        print("Batched parallel OCR text extraction complete.")
+        return "".join(all_texts)
+        
     except Exception as e:
         print(f"Error extracting text via OCR: {e}")
         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
-        
-    return text
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """Splits text into chunks with overlap."""
