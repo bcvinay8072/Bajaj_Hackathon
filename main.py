@@ -63,22 +63,25 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 # --- Document Processing Functions ---
 def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
-    """Extracts text from a PDF file stream using parallelized OCR."""
+    """
+    Extracts text from a PDF file stream using sequential OCR to save memory.
+    """
+    text = ""
     try:
         images = convert_from_bytes(file_stream.read())
         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
 
-        def ocr_page(image):
-            return pytesseract.image_to_string(image) or ""
-
-        with ThreadPoolExecutor() as executor:
-            texts = list(executor.map(ocr_page, images))
+        # Process one page at a time to conserve memory
+        for i, image in enumerate(images):
+            print(f"Performing OCR on page {i+1}...")
+            text += pytesseract.image_to_string(image) or ""
         
-        print("Parallel OCR text extraction complete.")
-        return "".join(texts)
+        print("OCR text extraction complete.")
     except Exception as e:
         print(f"Error extracting text via OCR: {e}")
         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
+        
+    return text
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """Splits text into chunks with overlap."""
