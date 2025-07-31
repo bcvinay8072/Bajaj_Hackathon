@@ -1,0 +1,14 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables - DO NOT COMMIT
+.env
+
+# IDE folders
+.vscode/
+.idea/
