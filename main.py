@@ -83,6 +83,19 @@ def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
         
     return text
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    """Splits text into chunks with overlap."""
+    if not text:
+        return []
+    words = text.split()
+    if len(words) <= chunk_size:
+        return [" ".join(words)]
+    
+    chunks = []
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = words[i:i + chunk_size]
+        chunks.append(" ".join(chunk))
+    return chunks
 
 # --- Embedding and Vector Store Functions ---
 def generate_embeddings(texts: List[str]) -> List[List[float]]:
