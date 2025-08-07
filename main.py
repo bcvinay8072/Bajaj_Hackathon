@@ -244,7 +244,7 @@ async def startup_event():
     pinecone_index = pinecone_client.Index(PINECONE_INDEX_NAME)
     print(f"Pinecone index '{PINECONE_INDEX_NAME}' is ready.")
 
-@app.post("/hackrx/run", response_model=AnswerResponse, dependencies=[Depends(verify_token)])
+@app.post("/api/v1/hackrx/run", response_model=AnswerResponse, dependencies=[Depends(verify_token)])
 async def run_submission(request: RunRequest):
     """Main endpoint to process documents and answer questions."""
     start_time = time.time()
