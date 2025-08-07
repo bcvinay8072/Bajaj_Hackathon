@@ -62,27 +62,87 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return True
 
 # --- Document Processing Functions ---
+# *******************************1 - Sequential Processing*******************************
+# def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
+#     """
+#     Extracts text from a PDF file stream using sequential OCR to save memory.
+#     """
+#     text = ""
+#     try:
+#         images = convert_from_bytes(file_stream.read())
+#         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
+
+#         # Process one page at a time to conserve memory
+#         for i, image in enumerate(images):
+#             print(f"Performing OCR on page {i+1}...")
+#             text += pytesseract.image_to_string(image) or ""
+        
+#         print("OCR text extraction complete.")
+#     except Exception as e:
+#         print(f"Error extracting text via OCR: {e}")
+#         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
+        
+#     return text
+
+# *******************************2 - Batched Parallel Processing*******************************
 
 def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
     """
-    Extracts text from a PDF file stream using sequential OCR to save memory.
+    Extracts text using batched parallel OCR to balance speed and memory usage.
     """
-    text = ""
+    all_texts = []
     try:
         images = convert_from_bytes(file_stream.read())
         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
 
-        # Process one page at a time to conserve memory
-        for i, image in enumerate(images):
-            print(f"Performing OCR on page {i+1}...")
-            text += pytesseract.image_to_string(image) or ""
+        # Process pages in small batches to control memory and CPU time
+        batch_size = 4 
+
+        def ocr_page(image):
+            return pytesseract.image_to_string(image) or ""
+
+        with ThreadPoolExecutor() as executor:
+            # Loop through the images in batches
+            for i in range(0, len(images), batch_size):
+                batch = images[i:i + batch_size]
+                print(f"Processing batch starting at page {i+1}...")
+                
+                # Run OCR on the current batch in parallel
+                texts = list(executor.map(ocr_page, batch))
+                all_texts.extend(texts)
         
-        print("OCR text extraction complete.")
+        print("Batched parallel OCR text extraction complete.")
+        return "".join(all_texts)
+        
     except Exception as e:
         print(f"Error extracting text via OCR: {e}")
         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
+
+# *******************************3 - Complete Parallel Processing*******************************
+# def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
+#     """
+#     Extracts text from a PDF file stream using fully parallelized OCR for maximum speed.
+#     """
+#     try:
+#         images = convert_from_bytes(file_stream.read())
+#         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
+
+#         def ocr_page(image):
+#             # This function will be run in parallel for each page
+#             return pytesseract.image_to_string(image) or ""
+
+#         # Use a ThreadPoolExecutor to run OCR on all pages concurrently
+#         with ThreadPoolExecutor() as executor:
+#             texts = list(executor.map(ocr_page, images))
         
-    return text
+#         print("Parallel OCR text extraction complete.")
+#         return "".join(texts)
+        
+#     except Exception as e:
+#         print(f"Error extracting text via OCR: {e}")
+#         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
+
+
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """Splits text into chunks with overlap."""
     if not text:
