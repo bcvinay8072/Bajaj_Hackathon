@@ -7,3 +7,4 @@ google-generativeai
 pytesseract
 pdf2image
 Pillow
+pypdf
