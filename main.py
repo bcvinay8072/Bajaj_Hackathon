@@ -202,7 +202,7 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
     async with semaphore:
         print(f"Processing question: '{question[:30]}...'")
         
-        context_chunks = hybrid_query(pinecone_index, all_chunks, question, question_embedding, top_k=5)
+        context_chunks = hybrid_query(pinecone_index, all_chunks, question, question_embedding, top_k=3)
         context_str = "\n---\n".join(context_chunks)
         
         # Use a stable, production-ready model for reliability in the competition
