@@ -1,27 +1,39 @@
+# ==============================================================================
+# Final main.py for HackRx 6.0 - Intelligent Query-Retrieval System
+# ==============================================================================
+
 import os
 import uuid
 import requests
-from io import BytesIO
-import pytesseract
-from pdf2image import convert_from_bytes
-from PIL import Image
 import asyncio
 import time
+from io import BytesIO
+from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor
+from pypdf import PdfReader
 
+# --- Core Libraries ---
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import List, Dict
-
-from pinecone import Pinecone, ServerlessSpec
-import google.generativeai as genai
 from dotenv import load_dotenv
+
+# --- AI & Vector DB Services ---
+import google.generativeai as genai
+from pinecone import Pinecone, ServerlessSpec
+
+# --- PDF Processing & OCR ---
+import pytesseract
+from pdf2image import convert_from_bytes
+from PIL import Image
+
+
+# --- 1. Configuration & Clients ---
 
 # Load environment variables from .env file
 load_dotenv()
 
-# --- Configuration & Global Clients ---
+# API Key Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
@@ -35,15 +47,16 @@ genai.configure(api_key=GEMINI_API_KEY)
 EMBEDDING_MODEL = "models/embedding-001"
 EMBEDDING_DIM = 768
 
-# Initialize Pinecone and cache
+# Initialize Pinecone and in-memory cache
 pinecone_client = Pinecone(api_key=PINECONE_API_KEY)
 pinecone_index = None 
 document_cache = {}
 
-# --- FastAPI App Initialization ---
+
+# --- 2. FastAPI App Initialization & Pydantic Models ---
+
 app = FastAPI(title="HackRx 6.0 Query-Retrieval System")
 
-# --- Pydantic Models for Request/Response ---
 class RunRequest(BaseModel):
     documents: str
     questions: List[str]
@@ -51,7 +64,9 @@ class RunRequest(BaseModel):
 class AnswerResponse(BaseModel):
     answers: List[str]
 
-# --- Security Dependency ---
+
+# --- 3. Security ---
+
 security = HTTPBearer()
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if credentials.scheme != "Bearer" or credentials.credentials != BEARER_TOKEN:
@@ -61,34 +76,45 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
         )
     return True
 
-# --- Document Processing Functions ---
-# *******************************1 - Sequential Processing*******************************
-# def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
-#     """
-#     Extracts text from a PDF file stream using sequential OCR to save memory.
-#     """
-#     text = ""
-#     try:
-#         images = convert_from_bytes(file_stream.read())
-#         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
 
-#         # Process one page at a time to conserve memory
-#         for i, image in enumerate(images):
-#             print(f"Performing OCR on page {i+1}...")
-#             text += pytesseract.image_to_string(image) or ""
-        
-#         print("OCR text extraction complete.")
-#     except Exception as e:
-#         print(f"Error extracting text via OCR: {e}")
-#         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
-        
-#     return text
+# --- 4. Document Processing ---
 
-# *******************************2 - Batched Parallel Processing*******************************
+# --- 4. Document Processing ---
 
 def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
     """
-    Extracts text using batched parallel OCR to balance speed and memory usage.
+    Intelligently extracts text from a PDF. It first tries a fast direct extraction.
+    If that fails (indicating a scanned/image-based PDF), it falls back to OCR.
+    """
+    text = ""
+    # Create two in-memory copies of the file stream to avoid consuming it
+    stream_copy1 = BytesIO(file_stream.getvalue())
+    stream_copy2 = BytesIO(file_stream.getvalue())
+
+    # --- Method 1: Fast Direct Text Extraction ---
+    try:
+        print("Attempting fast direct text extraction...")
+        pdf_reader = PdfReader(stream_copy1)
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
+    except Exception:
+        text = "" # Reset text if pypdf fails for any reason
+
+    # If direct extraction yields significant text, use it.
+    if len(text.strip()) > 100:
+        print("Direct text extraction successful.")
+        return text
+
+    # --- Method 2: Fallback to OCR ---
+    print("Direct extraction failed or yielded minimal text. Falling back to OCR...")
+    return extract_text_with_ocr(stream_copy2)
+
+
+def extract_text_with_ocr(file_stream: BytesIO) -> str:
+    """
+    The batched parallel OCR function (now used as a fallback).
     """
     all_texts = []
     try:
@@ -101,12 +127,9 @@ def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
             return pytesseract.image_to_string(image) or ""
 
         with ThreadPoolExecutor() as executor:
-            # Loop through the images in batches
             for i in range(0, len(images), batch_size):
                 batch = images[i:i + batch_size]
                 print(f"Processing batch starting at page {i+1}...")
-                
-                # Run OCR on the current batch in parallel
                 texts = list(executor.map(ocr_page, batch))
                 all_texts.extend(texts)
         
@@ -116,47 +139,22 @@ def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
     except Exception as e:
         print(f"Error extracting text via OCR: {e}")
         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
-
-# *******************************3 - Complete Parallel Processing*******************************
-# def extract_text_from_pdf_stream(file_stream: BytesIO) -> str:
-#     """
-#     Extracts text from a PDF file stream using fully parallelized OCR for maximum speed.
-#     """
-#     try:
-#         images = convert_from_bytes(file_stream.read())
-#         print(f"PDF converted to {len(images)} page(s) for OCR processing.")
-
-#         def ocr_page(image):
-#             # This function will be run in parallel for each page
-#             return pytesseract.image_to_string(image) or ""
-
-#         # Use a ThreadPoolExecutor to run OCR on all pages concurrently
-#         with ThreadPoolExecutor() as executor:
-#             texts = list(executor.map(ocr_page, images))
-        
-#         print("Parallel OCR text extraction complete.")
-#         return "".join(texts)
-        
-#     except Exception as e:
-#         print(f"Error extracting text via OCR: {e}")
-#         raise ValueError(f"Failed to extract text from PDF using OCR: {e}")
-
-
+    
+    
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     """Splits text into chunks with overlap."""
-    if not text:
-        return []
+    if not text: return []
     words = text.split()
-    if len(words) <= chunk_size:
-        return [" ".join(words)]
+    if len(words) <= chunk_size: return [" ".join(words)]
     
     chunks = []
     for i in range(0, len(words), chunk_size - overlap):
-        chunk = words[i:i + chunk_size]
-        chunks.append(" ".join(chunk))
+        chunks.append(" ".join(words[i:i + chunk_size]))
     return chunks
 
-# --- Embedding and Vector Store Functions ---
+
+# --- 5. Embedding, Vector Storage, and Retrieval ---
+
 def generate_embeddings(texts: List[str]) -> List[List[float]]:
     """Generates embeddings for a list of document texts using Gemini."""
     if not texts: return []
@@ -176,8 +174,7 @@ def upsert_chunks_to_pinecone(index, chunks: List[str], document_id: str):
         })
     
     for i in range(0, len(vectors_to_upsert), 100):
-        batch = vectors_to_upsert[i:i + 100]
-        index.upsert(vectors=batch)
+        index.upsert(vectors=vectors_to_upsert[i:i + 100])
     print(f"Successfully upserted {len(vectors_to_upsert)} vectors.")
 
 def query_pinecone(index, query_embedding: List[float], top_k: int) -> List[str]:
@@ -193,11 +190,13 @@ def hybrid_query(index, all_chunks: List[str], question: str, question_embedding
     keyword_results = [chunk for chunk in all_chunks if any(keyword in chunk.lower() for keyword in question_keywords)]
     
     combined_results = semantic_results + keyword_results
-    unique_results = list(dict.fromkeys(combined_results))
+    unique_results = list(dict.fromkeys(combined_results)) # Simple way to get unique results in order
     print(f"Found {len(unique_results)} unique chunks with hybrid search.")
     return unique_results
 
-# --- LLM Processing Function (RAG) ---
+
+# --- 6. LLM Answer Generation ---
+
 async def get_answer_for_question(question: str, question_embedding: List[float], all_chunks: List[str], semaphore: asyncio.Semaphore):
     """Asynchronously gets a single answer for a single question using a hybrid search context."""
     async with semaphore:
@@ -206,7 +205,8 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
         context_chunks = hybrid_query(pinecone_index, all_chunks, question, question_embedding, top_k=5)
         context_str = "\n---\n".join(context_chunks)
         
-        llm_model = genai.GenerativeModel('gemini-2.5-flash')
+        # Use a stable, production-ready model for reliability in the competition
+        llm_model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
         prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer questions based *exclusively* on the provided context.
         **Instructions:**
@@ -229,7 +229,9 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
         )
         return response.text.strip()
 
-# --- FastAPI Startup & Main Endpoint ---
+
+# --- 7. FastAPI Startup & Main Endpoint ---
+
 @app.on_event("startup")
 async def startup_event():
     """Initializes the Pinecone index on application startup."""
@@ -288,7 +290,5 @@ async def run_submission(request: RunRequest):
     print(f"--- Request completed in {duration:.2f} seconds ---")
     return AnswerResponse(answers=results)
 
-# --- How to Run Locally ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# To run this application locally, use the following command in your terminal:
+# uvicorn main:app --reload
