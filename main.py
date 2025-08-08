@@ -215,17 +215,18 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
         
         llm_model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
-        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer a question based *exclusively* on the provided context.
+         prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer any user question based *exclusively* on the provided context.
 
         **Instructions:**
-        1.  **Analyze the user's question** to understand what specific information is being asked, including any scenarios or conditions.
-        2.  **Scan the provided context** to find all relevant clauses, definitions, limits, waiting periods, and exclusions.
-        3.  **Think step-by-step**:
-            * First, explicitly state the rule, clause, or definition from the policy that applies to the question.
-            * Next, if the question is a scenario, apply the rule to the facts of the scenario. Show any calculations if needed.
-            * Finally, provide a clear and concise final answer based on your step-by-step reasoning.
-        4.  If the information is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document."
-        5.  Do not invent, assume, or infer any information not explicitly stated in the context.
+        1.  **Analyze the User's Question:** First, identify the type of question being asked (e.g., direct fact, yes/no, or a scenario with specific details like names, ages, or dates).
+        2.  **Scan the Context:** Thoroughly search the provided context for all relevant clauses, definitions, limits, waiting periods, and exclusions that relate to the question.
+        3.  **Think Step-by-Step:**
+            * **State the Rule:** Begin by quoting the exact rule, clause, or definition from the policy that applies to the question. If multiple clauses are relevant, state them all.
+            * **Apply to Scenario (if applicable):** If the question is a scenario, explicitly apply the rules to the specific facts of the scenario. Show any necessary calculations.
+            * **Formulate the Conclusion:** Based *only* on the rules and your analysis, form a definitive conclusion. For yes/no questions, the final answer must start with a clear "Yes" or "No".
+        4.  **Provide the Final Answer:** Combine your reasoning into a clear, final answer.
+
+        **Crucial Rule:** If the information to answer the question is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document." Do not invent, assume, or infer any information.
 
         **Context:**
         ---
