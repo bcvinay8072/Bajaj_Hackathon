@@ -215,17 +215,17 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
         
         llm_model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
-        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer a question based exclusively on the provided context.
+        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer a question based *exclusively* on the provided context.
 
-    **Instructions:**
-    1.  **Analyze the user's question** to understand what specific information is being asked.
-    2.  **Scan the provided context** to find all relevant clauses, definitions, limits, and waiting periods.
-    3.  **Think step-by-step**:
-        * First, explicitly state the rule or clause from the policy that applies to the question.
-        * Next, show the calculation if one is needed.
-        * Finally, provide a clear and concise final answer based on your step-by-step reasoning.
-    4.  If the information is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document."
-    5.  Do not invent, assume, or infer any information not explicitly stated in the context.
+        **Instructions:**
+        1.  **Analyze the user's question** to understand what specific information is being asked, including any scenarios or conditions.
+        2.  **Scan the provided context** to find all relevant clauses, definitions, limits, waiting periods, and exclusions.
+        3.  **Think step-by-step**:
+            * First, explicitly state the rule, clause, or definition from the policy that applies to the question.
+            * Next, if the question is a scenario, apply the rule to the facts of the scenario. Show any calculations if needed.
+            * Finally, provide a clear and concise final answer based on your step-by-step reasoning.
+        4.  If the information is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document."
+        5.  Do not invent, assume, or infer any information not explicitly stated in the context.
 
         **Context:**
         ---
