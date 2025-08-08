@@ -215,7 +215,7 @@ async def get_answer_for_question(question: str, question_embedding: List[float]
         
         llm_model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
-         prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer any user question based *exclusively* on the provided context.
+        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer any user question based *exclusively* on the provided context.
 
         **Instructions:**
         1.  **Analyze the User's Question:** First, identify the type of question being asked (e.g., direct fact, yes/no, or a scenario with specific details like names, ages, or dates).
