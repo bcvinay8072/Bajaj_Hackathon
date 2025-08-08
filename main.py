@@ -11,6 +11,7 @@ from io import BytesIO
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor
 from pypdf import PdfReader
+import json
 
 # --- Core Libraries ---
 from fastapi import FastAPI, HTTPException, Depends, status
@@ -183,14 +184,21 @@ def query_pinecone(index, query_embedding: List[float], top_k: int) -> List[str]
     return [match.metadata['text'] for match in results.matches]
 
 def hybrid_query(index, all_chunks: List[str], question: str, question_embedding: List[float], top_k: int) -> List[str]:
-    """Combines semantic search with keyword search for improved accuracy."""
-    semantic_results = query_pinecone(index, question_embedding, top_k=top_k)
+    """
+    Combines semantic and keyword search, with limits to control context size.
+    """
+    # 1. Perform semantic search, reducing top_k for fewer results
+    semantic_results = query_pinecone(index, question_embedding, top_k=3) # Reduced to 3
     
+    # 2. Perform keyword search
     question_keywords = set(question.lower().split())
     keyword_results = [chunk for chunk in all_chunks if any(keyword in chunk.lower() for keyword in question_keywords)]
     
-    combined_results = semantic_results + keyword_results
-    unique_results = list(dict.fromkeys(combined_results)) # Simple way to get unique results in order
+    # 3. Combine results, limiting keyword results to prevent excessive token usage
+    # We take the best 3 semantic results and add up to 5 relevant keyword results
+    combined_results = semantic_results + keyword_results[:5] # Limit keyword results
+    
+    unique_results = list(dict.fromkeys(combined_results))
     print(f"Found {len(unique_results)} unique chunks with hybrid search.")
     return unique_results
 
@@ -200,34 +208,55 @@ def hybrid_query(index, all_chunks: List[str], question: str, question_embedding
 async def get_answer_for_question(question: str, question_embedding: List[float], all_chunks: List[str], semaphore: asyncio.Semaphore):
     """Asynchronously gets a single answer for a single question using a hybrid search context."""
     async with semaphore:
-        print(f"Processing question: '{question[:30]}...'")
+        print(f"Processing question: '{question[:]}...'")
         
-        context_chunks = hybrid_query(pinecone_index, all_chunks, question, question_embedding, top_k=3)
+        context_chunks = hybrid_query(pinecone_index, all_chunks, question, question_embedding, top_k=5)
         context_str = "\n---\n".join(context_chunks)
         
-        # Use a stable, production-ready model for reliability in the competition
         llm_model = genai.GenerativeModel('gemini-2.0-flash-lite')
         
-        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer questions based *exclusively* on the provided context.
-        **Instructions:**
-        1. Carefully read the provided context.
-        2. Answer the user's question using only the information found in the context.
-        3. If the answer is a specific number, amount, or time period, quote it exactly.
-        4. If the information is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document."
-        5. Do not invent, assume, or infer any information not explicitly stated in the context.
+        prompt = f"""You are a precise and meticulous insurance policy analyst. Your task is to answer a question based exclusively on the provided context.
+
+    **Instructions:**
+    1.  **Analyze the user's question** to understand what specific information is being asked.
+    2.  **Scan the provided context** to find all relevant clauses, definitions, limits, and waiting periods.
+    3.  **Think step-by-step**:
+        * First, explicitly state the rule or clause from the policy that applies to the question.
+        * Next, show the calculation if one is needed.
+        * Finally, provide a clear and concise final answer based on your step-by-step reasoning.
+    4.  If the information is not available in the context, you MUST respond with the exact phrase: "The answer is not available in the provided document."
+    5.  Do not invent, assume, or infer any information not explicitly stated in the context.
 
         **Context:**
         ---
         {context_str}
         ---
+
         **Question:** {question}
-        **Answer:**"""
+
+        **JSON Response:**
+        ```json
+        """
         
         response = await llm_model.generate_content_async(
             prompt,
-            generation_config=genai.types.GenerationConfig(temperature=0.1)
+            generation_config=genai.types.GenerationConfig(temperature=0.0)
         )
-        return response.text.strip()
+        
+        final_answer = "Error: Could not parse LLM response." # Default error message
+        try:
+            # Clean up and parse the JSON response from the model
+            json_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed_response = json.loads(json_text)
+            final_answer = parsed_response.get("answer", "Error: 'answer' key not found in LLM response.")
+        except (json.JSONDecodeError, AttributeError):
+            # If the model fails to return valid JSON, use its raw text as a fallback
+            final_answer = response.text.strip()
+        
+        # Print the final answer to the server logs
+        print(f"Final Answer Generated: {final_answer[:15]}")
+        
+        return final_answer
 
 
 # --- 7. FastAPI Startup & Main Endpoint ---
@@ -249,6 +278,8 @@ async def startup_event():
 async def run_submission(request: RunRequest):
     """Main endpoint to process documents and answer questions."""
     start_time = time.time()
+    
+    print(f"Received request for document: {request.documents}")
     session_document_id = str(uuid.uuid4())
     
     if request.documents in document_cache:
